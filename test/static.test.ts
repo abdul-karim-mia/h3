@@ -757,3 +757,127 @@ describeMatrix("serve static index resolution", (t, { it, expect }) => {
     expect(await docsSlashRes.text()).toBe("docs-index");
   });
 });
+
+describeMatrix("serve static preconditions (RFC 9110 §13.2.2)", (t, { it, expect }) => {
+  const mtime = 1_700_000_000_000;
+  beforeEach(() => {
+    t.app.all("/strong/**", (event) =>
+      serveStatic(event, {
+        getContents: (id) => `asset:${id}`,
+        getMeta: (id) => ({
+          type: "text/plain",
+          etag: '"strong-123"',
+          mtime,
+          path: id,
+        }),
+      }),
+    );
+
+    t.app.all("/weak/**", (event) =>
+      serveStatic(event, {
+        getContents: (id) => `asset:${id}`,
+        getMeta: (id) => ({
+          type: "text/plain",
+          etag: 'W/"weak-123"',
+          mtime,
+          path: id,
+        }),
+      }),
+    );
+  });
+
+  it("returns 412 when If-Match does not match strong ETag (#1639)", async () => {
+    const staleRes = await t.fetch("/strong/test.txt", {
+      headers: { "if-match": '"stale"' },
+    });
+    expect(staleRes.status).toBe(412);
+    expect(staleRes.headers.get("cache-control")).toBe("no-store");
+
+    const matchRes = await t.fetch("/strong/test.txt", {
+      headers: { "if-match": '"strong-123"' },
+    });
+    expect(matchRes.status).toBe(200);
+
+    const listRes = await t.fetch("/strong/test.txt", {
+      headers: { "if-match": '"stale", "strong-123"' },
+    });
+    expect(listRes.status).toBe(200);
+
+    const wildcardRes = await t.fetch("/strong/test.txt", {
+      headers: { "if-match": "*" },
+    });
+    expect(wildcardRes.status).toBe(200);
+
+    // Strong comparison rejects weak tags in If-Match
+    const weakIfMatchRes = await t.fetch("/strong/test.txt", {
+      headers: { "if-match": 'W/"strong-123"' },
+    });
+    expect(weakIfMatchRes.status).toBe(412);
+    expect(weakIfMatchRes.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("evaluates If-Match with weak asset ETag (#1639)", async () => {
+    const wildcardRes = await t.fetch("/weak/test.txt", {
+      headers: { "if-match": "*" },
+    });
+    expect(wildcardRes.status).toBe(200);
+
+    // Strong comparison with weak representation always fails per RFC 9110
+    const tagRes = await t.fetch("/weak/test.txt", {
+      headers: { "if-match": '"weak-123"' },
+    });
+    expect(tagRes.status).toBe(412);
+    expect(tagRes.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("evaluates If-Unmodified-Since when If-Match is absent (#1639)", async () => {
+    const exactTime = new Date(mtime).toUTCString();
+    const pastTime = new Date(mtime - 1000).toUTCString();
+    const futureTime = new Date(mtime + 1000).toUTCString();
+
+    const exactRes = await t.fetch("/strong/test.txt", {
+      headers: { "if-unmodified-since": exactTime },
+    });
+    expect(exactRes.status).toBe(200);
+
+    const futureRes = await t.fetch("/strong/test.txt", {
+      headers: { "if-unmodified-since": futureTime },
+    });
+    expect(futureRes.status).toBe(200);
+
+    const staleRes = await t.fetch("/strong/test.txt", {
+      headers: { "if-unmodified-since": pastTime },
+    });
+    expect(staleRes.status).toBe(412);
+    expect(staleRes.headers.get("cache-control")).toBe("no-store");
+
+    const invalidDateRes = await t.fetch("/strong/test.txt", {
+      headers: { "if-unmodified-since": "invalid date" },
+    });
+    expect(invalidDateRes.status).toBe(200);
+  });
+
+  it("ignores If-Unmodified-Since when If-Match is present (#1639)", async () => {
+    const pastTime = new Date(mtime - 1000).toUTCString();
+    // Even though pastTime is before mtime, If-Match matches and If-Unmodified-Since must be ignored
+    const res = await t.fetch("/strong/test.txt", {
+      headers: {
+        "if-match": '"strong-123"',
+        "if-unmodified-since": pastTime,
+      },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("evaluates precondition failure before If-None-Match 304 (#1639)", async () => {
+    // If-Match fails (412) even if If-None-Match matches (304)
+    const res = await t.fetch("/strong/test.txt", {
+      headers: {
+        "if-match": '"stale"',
+        "if-none-match": '"strong-123"',
+      },
+    });
+    expect(res.status).toBe(412);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+});
