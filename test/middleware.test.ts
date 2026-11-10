@@ -213,6 +213,26 @@ describeMatrix("middleware", (t, { it, expect }) => {
     expect(res.headers.getSetCookie()).toMatchObject(["session=abc123; Path=/; HttpOnly"]);
   });
 
+  it("merges prepared Vary header with Response own Vary header (#1642)", async () => {
+    t.app.use((event) => {
+      event.res.headers.append("Vary", "Accept-Encoding");
+    });
+    t.app.get("/", () => new Response("hi", { headers: { Vary: "Cookie" } }));
+
+    const res = await t.fetch("/");
+    expect(res.headers.get("vary")).toBe("Cookie, Accept-Encoding");
+  });
+
+  it("deduplicates Vary tokens case-insensitively when merging headers (#1642)", async () => {
+    t.app.use((event) => {
+      event.res.headers.append("Vary", "accept-encoding, Origin");
+    });
+    t.app.get("/", () => new Response("hi", { headers: { Vary: "Cookie, Accept-Encoding" } }));
+
+    const res = await t.fetch("/");
+    expect(res.headers.get("vary")).toBe("Cookie, Accept-Encoding, Origin");
+  });
+
   // Regression: `event.url.pathname` is canonicalized before matching (needless
   // escapes like `%40` decoded to `@`), but a route filter string passed to
   // `use(route, ...)` was handed to `routeToRegExp()` raw — so an escaped filter

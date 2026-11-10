@@ -29,11 +29,12 @@ describeMatrix("errors", (t, { it, expect, describe }) => {
               event.res.headers.set("x-success", "success");
               event.res.errHeaders.set("x-error", "prepared");
               event.res.errHeaders.append("set-cookie", "prepared=1");
+              event.res.errHeaders.append("vary", "Accept-Encoding");
               throw new HTTPError({
                 status: 422,
                 statusText: "Unprocessable",
                 data: { test: 123 },
-                headers: { "x-error-own": "own", "set-cookie": "error=1" },
+                headers: { "x-error-own": "own", "set-cookie": "error=1", vary: "Accept-Language" },
               });
             };
             t.app.use(asyncHandler ? async (event) => handler(event) : handler);
@@ -45,6 +46,7 @@ describeMatrix("errors", (t, { it, expect, describe }) => {
             expect(res.headers.get("x-error")).toBe("prepared");
             expect(res.headers.get("x-error-own")).toBe("own");
             expect(res.headers.get("x-success")).toBeNull();
+            expect(res.headers.get("vary")).toBe("Accept-Language, Accept-Encoding");
             expect(res.headers.getSetCookie()).toEqual(["error=1", "prepared=1"]);
             if (method === "HEAD") {
               expect(res.headers.get("content-length")).toBeNull();

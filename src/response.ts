@@ -242,10 +242,32 @@ function prepareResponse(
     : val;
 }
 
+function mergeVary(first: string, second: string): string {
+  const parts = first
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const seen = new Set(parts.map((p) => p.toLowerCase()));
+  for (const part of second
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)) {
+    const lower = part.toLowerCase();
+    if (!seen.has(lower)) {
+      seen.add(lower);
+      parts.push(part);
+    }
+  }
+  return parts.join(", ");
+}
+
 function mergeHeaders(base: HeadersInit, overrides: Headers, target = new Headers(base)): Headers {
   for (const [name, value] of overrides) {
     if (name === "set-cookie") {
       target.append(name, value);
+    } else if (name === "vary") {
+      const own = target.get(name);
+      target.set(name, own ? mergeVary(own, value) : value);
     } else {
       target.set(name, value);
     }
