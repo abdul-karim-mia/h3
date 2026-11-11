@@ -246,11 +246,34 @@ function mergeHeaders(base: HeadersInit, overrides: Headers, target = new Header
   for (const [name, value] of overrides) {
     if (name === "set-cookie") {
       target.append(name, value);
+    } else if (name === "vary" && target.has("vary")) {
+      appendVary(target, value);
     } else {
       target.set(name, value);
     }
   }
   return target;
+}
+
+function appendVary(headers: Headers, value: string): void {
+  const current = headers.get("vary");
+  if (!current) {
+    headers.set("vary", value);
+    return;
+  }
+  const known = new Set<string>();
+  const names: string[] = [];
+  for (const name of (current + "," + value).split(",")) {
+    const trimmed = name.trim();
+    if (trimmed) {
+      const lower = trimmed.toLowerCase();
+      if (!known.has(lower)) {
+        known.add(lower);
+        names.push(trimmed);
+      }
+    }
+  }
+  headers.set("vary", names.join(", "));
 }
 
 const frozen =

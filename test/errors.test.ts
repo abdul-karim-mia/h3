@@ -220,6 +220,23 @@ describeMatrix("errors", (t, { it, expect, describe }) => {
     t.errors = [];
   });
 
+  it("merges error's own Vary with errHeaders Vary (deduplicated, case-insensitive)", async () => {
+    t.app.get("/error-vary", (event) => {
+      event.res.errHeaders.append("Vary", "Accept-Encoding");
+      event.res.errHeaders.append("Vary", "cookie");
+      throw new HTTPError({
+        status: 500,
+        headers: { Vary: "Cookie, Origin" },
+      });
+    });
+
+    const res = await t.fetch("/error-vary");
+    expect(res.status).toBe(500);
+    expect(res.headers.get("vary")).toBe("Cookie, Origin, Accept-Encoding");
+
+    t.errors = [];
+  });
+
   it("throw number coerces to status", async () => {
     t.app.use(() => {
       throw 404;
