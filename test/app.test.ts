@@ -605,4 +605,39 @@ describeMatrix("app", (t, { it, expect }) => {
     const res = await t.fetch("/multi");
     expect(res.headers.getSetCookie()).toEqual(["a=1; Path=/", "b=2; Path=/", "staged=s; Path=/"]);
   });
+
+  it("merges prepared Vary headers into a handler-returned Response", async () => {
+    t.app.use((event) => {
+      event.res.headers.append("Vary", "Accept-Encoding");
+    });
+    t.app.get("/vary", () => new Response("hi", { headers: { Vary: "Cookie" } }));
+    const res = await t.fetch("/vary");
+    expect(res.headers.get("vary")).toBe("Cookie, Accept-Encoding");
+  });
+
+  it("deduplicates Vary header values case-insensitively when merging", async () => {
+    t.app.use((event) => {
+      event.res.headers.append("Vary", "cookie, accept-encoding, Accept");
+    });
+    t.app.get(
+      "/dedup",
+      () => new Response("hi", { headers: { Vary: "Cookie, Origin, Accept-Encoding" } }),
+    );
+    const res = await t.fetch("/dedup");
+    expect(res.headers.get("vary")).toBe("Cookie, Origin, Accept-Encoding, Accept");
+  });
+
+  it("merges Vary from errHeaders into an error Response", async () => {
+    t.app.use((event) => {
+      event.res.errHeaders.set("Vary", "Origin");
+    });
+    t.app.get("/error-vary", () => {
+      throw new HTTPError({
+        status: 400,
+        headers: { Vary: "Accept" },
+      });
+    });
+    const res = await t.fetch("/error-vary");
+    expect(res.headers.get("vary")).toBe("Accept, Origin");
+  });
 });
